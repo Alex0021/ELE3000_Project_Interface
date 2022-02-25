@@ -4,13 +4,15 @@ import grafica.*;
 //---------------------------------//
 //-----------| CONSTANTS |---------//
 //---------------------------------//
-final int MAX_RXDATA_LENGTH = 24;
+final int MAX_RXDATA_LENGTH = 30;
 final int MAX_HEIGHT_SENOSR_VALUE = 50;
 final int MAX_GYRO_VALUE = 250;
 final int MAX_ACCEL_VALUE = 2;
 final int MAX_TEMP_VALUE = 100;
+final int MAX_ANGLE_VALUE = 90;
 final float H_PLOT_X_LIM = 10;
 final float IMU_PLOT_X_LIM = 10;
+final int SERIAL_RX_THREAD_SLEEP = 10; //En ms
 
 final int[] RECORD_BTN_POS = {840, 80};
 final int[] RECORD_BTN_DIM = {150, 40};
@@ -33,6 +35,7 @@ float[] rawHeights;
 float[] rawGyro;
 float[] rawAccel;
 float temperature;
+float pitchAngle, rollAngle, yawAngle;
 int nbRx;
 
 // Graphics //
@@ -55,6 +58,7 @@ boolean mouseOverSaveBtn;
 boolean showGyroPlotData;
 boolean mouseOverImuSwitchBtn;
 long lastValueTextUpdate;
+boolean serialRxData;
 
 // Output //
 PrintWriter fileOutputStream;
@@ -65,7 +69,7 @@ PrintWriter fileOutputStream;
 void setup()
 {
   //Canvas setup
-  size(1200, 950);
+  size(1300, 950);
   frameRate(60);
   
   //Variables initialization
@@ -78,11 +82,15 @@ void setup()
   currentTimePoint = 0;
   hPlotXOffset = 0;
   lastValueTextUpdate = 0;
+  pitchAngle = 0;
+  rollAngle = 0;
+  yawAngle = 0;
   recordData = false;
   mouseOverRecBtn = false;
   showSaveBtn = false;
   showGyroPlotData = true;
   mouseOverImuSwitchBtn = false;
+  serialRxData = true;
   appFont = loadFont("AgencyFB-Bold-48.vlw");  //This font has been previously created using "Create font..." in processing
   
   //Plot setup
@@ -131,18 +139,12 @@ void setup()
   } catch (Exception e) {
     println(e);
   }
+  thread("processRxData");
 }
 
 void draw()
 {
   background(0);
-  
-  //Checking serial buffer
-  if (myPort.available() >= MAX_RXDATA_LENGTH)  //All values have been received
-  {
-    myPort.readBytes(rxBuffer);
-    processRxData();
-  }
   
   // Draw text //
   textFont(appFont);
@@ -162,7 +164,10 @@ void draw()
   text("Accel X:   " + round(rawAccel[0]*1000)/1000.0, 600, 50);
   text("Accel Y:   " + round(rawAccel[1]*1000)/1000.0, 600, 100);
   text("Accel Z:   " + round(rawAccel[2]*1000)/1000.0, 600, 150);
-  text("Temperature:   " + round(temperature*100)/100.0, 850, 50);
+  text("Temperature:   " + round(temperature*100)/100.0, 825, 50);
+  text("Pitch:   " + round(pitchAngle*100)/100.0 + " °", 1060, 50);
+   text("Roll:   " + round(rollAngle*100)/100.0 + " °", 1060, 100);
+    text("Yaw:   " + round(yawAngle*100)/100.0 + " °", 1060, 150);
     
   // Draw button for starting & stoping data plotting //
   rectMode(CORNER);
@@ -371,57 +376,82 @@ void mouseClicked()
   }
 }
 
+/**
+*  Thread pour reception des donnees via l'interface USART
+*/
 void processRxData()
 {
-  if (rxBuffer[0] != '$')
+  while(serialRxData)
   {
-    println("Serial reception ERROR");
-    myPort.clear();
-    return;
+    if (myPort != null && myPort.available() >= MAX_RXDATA_LENGTH)
+    {
+      myPort.readBytes(rxBuffer);
+      myPort.clear();
+      if (rxBuffer[0] != '$')
+      {
+        println("Serial reception ERROR");
+      }
+      else
+      {
+        // Values conversion //
+        int rawVal;
+        int sign;
+        // Height_1 //
+        rawVal = (int(rxBuffer[1]) << 8) | int(rxBuffer[2]);
+        rawHeights[0] =  float(rawVal & 0xFFFF) / 65535.0 * MAX_HEIGHT_SENOSR_VALUE;
+        // Height_2 //
+        rawVal = (int(rxBuffer[3]) << 8) | int(rxBuffer[4]);
+        rawHeights[1] =  float(rawVal & 0xFFFF) / 65535.0 * MAX_HEIGHT_SENOSR_VALUE;
+        // Height_3 //
+        rawVal = (int(rxBuffer[5]) << 8) | int(rxBuffer[6]);
+        rawHeights[2] =  float(rawVal & 0xFFFF) / 65535.0 * MAX_HEIGHT_SENOSR_VALUE;
+        // Height_4 //
+        rawVal = (int(rxBuffer[7]) << 8) | int(rxBuffer[8]);
+        rawHeights[3] =  float(rawVal & 0xFFFF) / 65535.0 * MAX_HEIGHT_SENOSR_VALUE;
+        // GyroX //
+        sign = (int(rxBuffer[9] >> 7) & 0x01) == 1 ? -1:1;
+        rawVal = (int((rxBuffer[9]) << 8) & 0x7F00) | int(rxBuffer[10]);
+        rawGyro[0] = sign * float(rawVal & 0x7FFF) / 32767.0 * MAX_GYRO_VALUE;
+        // GyroY //
+        sign = (int(rxBuffer[11] >> 7) & 0x01) == 1 ? -1:1;
+        rawVal = (int((rxBuffer[11]) << 8) & 0x7F00) | int(rxBuffer[12]);
+        rawGyro[1] = sign * float(rawVal & 0x7FFF) / 32767.0 * MAX_GYRO_VALUE;
+        // GyroZ //
+        sign = (int(rxBuffer[13] >> 7) & 0x01) == 1 ? -1:1;
+        rawVal = (int((rxBuffer[13]) << 8) & 0x7F00) | int(rxBuffer[14]);
+        rawGyro[2] = sign * float(rawVal & 0x7FFF) / 32767.0 * MAX_GYRO_VALUE;
+        // AccelX //
+        sign = (int(rxBuffer[15] >> 7) & 0x01) == 1 ? -1:1;
+        rawVal = (int((rxBuffer[15]) << 8) & 0x7F00) | int(rxBuffer[16]);
+        rawAccel[0] = sign * float(rawVal & 0x7FFF) / 32767.0 * MAX_ACCEL_VALUE;
+        // AccelY //
+        sign = (int(rxBuffer[17] >> 7) & 0x01) == 1 ? -1:1;
+        rawVal = (int((rxBuffer[17]) << 8) & 0x7F00) | int(rxBuffer[18]);
+        rawAccel[1] = sign * float(rawVal & 0x7FFF) / 32767.0 * MAX_ACCEL_VALUE;
+        // AccelZ //
+        sign = (int(rxBuffer[19] >> 7) & 0x01) == 1 ? -1:1;
+        rawVal = (int((rxBuffer[19]) << 8) & 0x7F00) | int(rxBuffer[20]);
+        rawAccel[2] = sign * float(rawVal & 0x7FFF) / 32767.0 * MAX_ACCEL_VALUE;
+        // Temperature //
+        sign = (int(rxBuffer[21] >> 7) & 0x01) == 1 ? -1:1;
+        rawVal = (int((rxBuffer[21]) << 8) & 0x7F00) | int(rxBuffer[22]);
+        temperature = sign * float(rawVal & 0x7FFF) / 32767.0 * MAX_TEMP_VALUE;
+        // Pitch Angle //
+        sign = (int(rxBuffer[23] >> 7) & 0x01) == 1 ? -1:1;
+        rawVal = (int((rxBuffer[23]) << 8) & 0x7F00) | int(rxBuffer[24]);
+        pitchAngle = sign * float(rawVal & 0x7FFF) / 32767.0 * MAX_ANGLE_VALUE; 
+        // Roll Angle //
+        sign = (int(rxBuffer[25] >> 7) & 0x01) == 1 ? -1:1;
+        rawVal = (int((rxBuffer[25]) << 8) & 0x7F00) | int(rxBuffer[26]);
+        rollAngle = sign * float(rawVal & 0x7FFF) / 32767.0 * MAX_ANGLE_VALUE; 
+        // Yaw Angle //
+        sign = (int(rxBuffer[27] >> 7) & 0x01) == 1 ? -1:1;
+        rawVal = (int((rxBuffer[27]) << 8) & 0x7F00) | int(rxBuffer[28]);
+        yawAngle = sign * float(rawVal & 0x7FFF) / 32767.0 * MAX_ANGLE_VALUE; 
+      }
+    }
+    delay(SERIAL_RX_THREAD_SLEEP);
   }
-  // Values conversion //
-  int rawVal;
-  int sign;
-  // Height_1 //
-  rawVal = (int(rxBuffer[1]) << 8) | int(rxBuffer[2]);
-  rawHeights[0] =  float(rawVal & 0xFFFF) / 65535.0 * MAX_HEIGHT_SENOSR_VALUE;
-  // Height_2 //
-  rawVal = (int(rxBuffer[3]) << 8) | int(rxBuffer[4]);
-  rawHeights[1] =  float(rawVal & 0xFFFF) / 65535.0 * MAX_HEIGHT_SENOSR_VALUE;
-  // Height_3 //
-  rawVal = (int(rxBuffer[5]) << 8) | int(rxBuffer[6]);
-  rawHeights[2] =  float(rawVal & 0xFFFF) / 65535.0 * MAX_HEIGHT_SENOSR_VALUE;
-  // Height_4 //
-  rawVal = (int(rxBuffer[7]) << 8) | int(rxBuffer[8]);
-  rawHeights[3] =  float(rawVal & 0xFFFF) / 65535.0 * MAX_HEIGHT_SENOSR_VALUE;
-  // GyroX //
-  sign = (int(rxBuffer[9] >> 7) & 0x01) == 1 ? -1:1;
-  rawVal = (int((rxBuffer[9]) << 8) & 0x7F00) | int(rxBuffer[10]);
-  rawGyro[0] = sign * float(rawVal & 0x7FFF) / 32767.0 * MAX_GYRO_VALUE;
-  // GyroY //
-  sign = (int(rxBuffer[11] >> 7) & 0x01) == 1 ? -1:1;
-  rawVal = (int((rxBuffer[11]) << 8) & 0x7F00) | int(rxBuffer[12]);
-  rawGyro[1] = sign * float(rawVal & 0x7FFF) / 32767.0 * MAX_GYRO_VALUE;
-  // GyroZ //
-  sign = (int(rxBuffer[13] >> 7) & 0x01) == 1 ? -1:1;
-  rawVal = (int((rxBuffer[13]) << 8) & 0x7F00) | int(rxBuffer[14]);
-  rawGyro[2] = sign * float(rawVal & 0x7FFF) / 32767.0 * MAX_GYRO_VALUE;
-  // AccelX //
-  sign = (int(rxBuffer[15] >> 7) & 0x01) == 1 ? -1:1;
-  rawVal = (int((rxBuffer[15]) << 8) & 0x7F00) | int(rxBuffer[16]);
-  rawAccel[0] = sign * float(rawVal & 0x7FFF) / 32767.0 * MAX_ACCEL_VALUE;
-  // AccelY //
-  sign = (int(rxBuffer[17] >> 7) & 0x01) == 1 ? -1:1;
-  rawVal = (int((rxBuffer[17]) << 8) & 0x7F00) | int(rxBuffer[18]);
-  rawAccel[1] = sign * float(rawVal & 0x7FFF) / 32767.0 * MAX_ACCEL_VALUE;
-  // AccelZ //
-  sign = (int(rxBuffer[19] >> 7) & 0x01) == 1 ? -1:1;
-  rawVal = (int((rxBuffer[19]) << 8) & 0x7F00) | int(rxBuffer[20]);
-  rawAccel[2] = sign * float(rawVal & 0x7FFF) / 32767.0 * MAX_ACCEL_VALUE;
-  // Temperature //
-  sign = (int(rxBuffer[21] >> 7) & 0x01) == 1 ? -1:1;
-  rawVal = (int((rxBuffer[21]) << 8) & 0x7F00) | int(rxBuffer[22]);
-  temperature = sign * float(rawVal & 0x7FFF) / 32767.0 * MAX_TEMP_VALUE;
 }
 
 void saveDataPointsToFile()
