@@ -37,6 +37,9 @@ final int SERIAL_RX_THREAD_SLEEP = 10; //En ms
 final int WORLD_TO_PIXEL_RATION = 10; //XX pixels pour 1 cm
 final float PROTOTYPE_LENGTH = 18.5; //En cm
 final float PROTOTYPE_WIDTH = 13.5; //En cm
+final PVector CAM_EYE_DEFAULT_POS = new PVector(0, -200, 800);
+final PVector DEFAULT_SCENE_CENTER = new PVector(0, -200, 0);
+
 
 //---------------------------------//
 //-------| USER VARIABLES |--------//
@@ -60,8 +63,11 @@ PFont appFont;
 
 Plateforme plateforme;
 PVector modelCenter;
+PVector camEyePos;
+PVector sceneCenter;
 Sol sol;
 Fleche fleche;
+Graduation grad;
 
 void setup()
 {
@@ -72,6 +78,8 @@ void setup()
   rawHeights = new float[4];
   rawGyro = new float[3];
   rawAccel = new float[3];
+  camEyePos = CAM_EYE_DEFAULT_POS.copy();
+  sceneCenter = DEFAULT_SCENE_CENTER.copy();
   temperature = 0;
   pitchAngle = 0;
   rollAngle = 0;
@@ -85,16 +93,17 @@ void setup()
   //Serial connection
   printArray(Serial.list());
   try {
-    myPort = new Serial(this, Serial.list()[0], 115200);
+    myPort = new Serial(this, Serial.list()[4], 115200);
   } catch (Exception e) {
     println(e);
   }  
   thread("processRxData");
   //frameRate(60);
-  plateforme = new Plateforme(modelCenter, PROTOTYPE_LENGTH, PROTOTYPE_WIDTH, WORLD_TO_PIXEL_RATION);
+  plateforme = new Plateforme(modelCenter, PROTOTYPE_LENGTH, PROTOTYPE_WIDTH, WORLD_TO_PIXEL_RATION, PROTOTYPE_LENGTH, PROTOTYPE_WIDTH);
   plateforme.setPlaneScaling(1.5);
   sol = new Sol(500);
   fleche = new Fleche(new PVector(-100, 0, 0), new PVector(0, -100, 0));
+  grad = new Graduation(new PVector(0, 0, 0), new PVector(-sin(PI/4), -cos(PI/4), 0), WORLD_TO_PIXEL_RATION, 20, 5);
 }
 
 void draw()
@@ -114,13 +123,15 @@ void draw()
   if (angleOnly) text("MODE ANGLE",  -50, height/2 - 300);
   else text("MODE HAUTEUR",  -50, height/2 - 300);
   
-  camera(0, -200, 800, // eyeX, eyeY, eyeZ
-         0, 0 - 200, 0.0, // center of the scene
+  camera(camEyePos.x, camEyePos.y, camEyePos.z, // eyeX, eyeY, eyeZ
+         sceneCenter.x, sceneCenter.y, sceneCenter.z, // center of the scene
          0.0, 1.0, 0.0);  //Upward direction
-  if (angleOnly) plateforme.setAngles(pitchAngle, rollAngle, 0);
-   else plateforme.estimatePosOnlyHeightPoints(rawHeights[0], rawHeights[1], rawHeights[2], rawHeights[3]);
+  //if (angleOnly) plateforme.setAngles(pitchAngle, rollAngle, 0);
+  // else plateforme.estimatePosOnlyHeightPoints(rawHeights[0], rawHeights[1], rawHeights[2], rawHeights[3]);
+   plateforme.estimatePosHeightAndIMU(rawHeights, radians(pitchAngle), radians(rollAngle));
   //plateforme.setAngles(0, -90, 0);
   //fleche.display();
+  //grad.display();
   plateforme.display();
   sol.display();
   
@@ -128,10 +139,26 @@ void draw()
 
 void keyPressed()
 {
- if (key == 's')
- {
-   angleOnly =! angleOnly;
- }
+  switch (key)
+  {
+    case '1':   // VUE DEVANT //
+      camEyePos = CAM_EYE_DEFAULT_POS.copy();
+      break;
+    case '2':  // 45 degree VUE COTE //
+      camEyePos.x = 500;
+      camEyePos.y = -400;
+      camEyePos.z = 600;
+      break;
+    case '3': // VUE DESSUS //
+      camEyePos.x = 0;
+      camEyePos.y = -600;
+      camEyePos.z = 10;
+      break;
+    case 's': 
+      angleOnly =! angleOnly;
+      break;
+  }
+
 }
 
 
@@ -158,15 +185,19 @@ void processRxData()
         // Height_1 //
         rawVal = (int(rxBuffer[1]) << 8) | int(rxBuffer[2]);
         rawHeights[0] =  float(rawVal & 0xFFFF) / 65535.0 * MAX_HEIGHT_SENOSR_VALUE;
+        rawHeights[0] = round(rawHeights[0]*100)/100.0;
         // Height_2 //
         rawVal = (int(rxBuffer[3]) << 8) | int(rxBuffer[4]);
         rawHeights[1] =  float(rawVal & 0xFFFF) / 65535.0 * MAX_HEIGHT_SENOSR_VALUE;
+        rawHeights[1] = round(rawHeights[1]*100)/100.0;
         // Height_3 //
         rawVal = (int(rxBuffer[5]) << 8) | int(rxBuffer[6]);
         rawHeights[2] =  float(rawVal & 0xFFFF) / 65535.0 * MAX_HEIGHT_SENOSR_VALUE;
+        rawHeights[2] = round(rawHeights[2]*100)/100.0;
         // Height_4 //
         rawVal = (int(rxBuffer[7]) << 8) | int(rxBuffer[8]);
         rawHeights[3] =  float(rawVal & 0xFFFF) / 65535.0 * MAX_HEIGHT_SENOSR_VALUE;
+        rawHeights[3] = round(rawHeights[3]*100)/100.0;
         // GyroX //
         sign = (int(rxBuffer[9] >> 7) & 0x01) == 1 ? -1:1;
         rawVal = (int((rxBuffer[9]) << 8) & 0x7F00) | int(rxBuffer[10]);

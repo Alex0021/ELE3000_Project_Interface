@@ -11,8 +11,8 @@ class Fleche
  {
   this.pos = new PVector(point1.x, point1.y, point1.z);
   this.dir = PVector.sub(point2, point1);
-  if (this.dir.x < 0 && this.dir.y == 0 && this.dir.z == 0) limitCase = true;
-  else limitCase = false;
+  if (this.dir.x < 0 && this.dir.y == 0 && this.dir.z == 0) this.limitCase = true;
+  else this.limitCase = false;
   this.rotAxis = this.dir.cross(new PVector(1, 0, 0));
   this.pColor = color(255, 0, 0);
  }
@@ -21,7 +21,7 @@ class Fleche
  {
    pushMatrix();
    translate(this.pos.x, this.pos.y, this.pos.z);
-   if (limitCase) rotateY(PI);
+   if (this.limitCase) rotateY(PI);
    else rotate(-PVector.angleBetween(new PVector(1,0,0), this.dir), this.rotAxis.x, this.rotAxis.y, this.rotAxis.z);
    stroke(pColor);
    strokeWeight(2);
